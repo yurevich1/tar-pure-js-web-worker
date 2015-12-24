@@ -1,0 +1,198 @@
+
+<html>
+<head>
+<meta charset="UTF-8">
+<script type="text/javascript" src="archive.lib.min.js"></script>
+<script type="text/javascript" src="tar.js"></script>
+<body>
+<button id="tarme">tar me!</button>
+<button id="untarme" disabled="disabled">untar me!</button>
+<br/>
+<br/>
+<button id="tarmemui">tar me! Main Thread</button>
+<button id="untarmemui" disabled="disabled">untar me! Main Thread</button>
+<p id="value">To start test process, please, press "tar me!" or "tar me! Main Thread" buttons.</p>
+<p>Usage:</p>
+<ul>
+<li>"tar me!" button generates a random string and converts into TAR archived data.</li>
+<li>"untar me!" button decompresses created TAR archived string into data array.</li>
+<li>"tar me! Main Thread!" &apm; "untar me! Main Thread" shows the work inside main thread. Be careful! This code completely blocks UI!</li>
+<li>Please, open console (F12) in order to view compressed and decompressed data</li>
+</ul>
+<a href="https://blog.slava.online" target="_blank">https://blog.slava.online</a>
+<br/>
+<a href="https://blog.slava.online/tar-xz-zip-archiver-webworker-for-browser-pure-js/" target="_blank">Description: https://blog.slava.online/tar-xz-zip-archiver-webworker-for-browser-pure-js/</a>
+<br/>
+<a href="https://blog.slava.online/archive/tar-xz-zip" target="_blank">Free online convertor</a>
+<br/>
+<a href="https://blog.slava.online/shareddir/tar/tar.zip" target="_blank">Download this example</a>
+
+<script>
+	var makeid = function(max_){
+    var text = "";
+    var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+    for( var i=0; i < max_; i++ )
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+
+    return text;
+	}, str2ab = function(str) {//ascii string to Uint8Array
+	var arr=[];
+	for(var i=0,j=str.length;i<j;++i){
+		arr.push(str.charCodeAt(i));
+	}
+	return new Uint8Array(arr);
+	}, Uint8ToString = function (u8a){
+		if (u8a == null) return "null";
+		var CHUNK_SZ = 0x8000;
+		var c = [];
+		for (var i=0; i < u8a.length; i+=CHUNK_SZ) {
+			c.push(String.fromCharCode.apply(null, u8a.subarray(i, i+CHUNK_SZ)));
+		}
+		return c.join("");
+	},
+	value = document.getElementById('value'),
+	tarme = document.getElementById('tarme'),
+	untarme = document.getElementById('untarme'),
+	tarmemui = document.getElementById('tarmemui'),
+	untarmemui = document.getElementById('untarmemui'),
+	workerTAR,
+	tmp,
+	t0 = (new Date).getTime(), t1 = t0,
+	kbl = 1024,
+	enableBtns = function() {
+		untarme.removeAttribute('disabled');
+		untarmemui.removeAttribute('disabled');
+	},
+	val = function(str) {
+		value.innerHTML = str;
+	};
+	//into TAR
+	tarme.onclick = function(){
+		val('generates String '  + kbl + ' *1024 length');
+		t0 = (new Date).getTime()
+		if(typeof(workerTAR) == "undefined") {
+			workerTAR = new Worker('worker.tar.wrapper.js');
+			workerTAR.onerror = function(e) {
+				val(e + '');
+				console.log("workerTAR error: ", e);
+				workerTAR = undefined;
+			}
+			var str_to_compress = makeid(kbl * 1024);
+			var ss = str2ab(str_to_compress);
+			var $ar = [new DataStorageInput('/',makeid(5) + "." + makeid(3),false,(ss))];
+			workerTAR.onmessage = function(event) {//1
+				if (event.data.type === 1){
+					val('' + Math.round((event.data.cur - 1) / event.data.max_ * 100.) + '%');
+				} else if (event.data.type == 2){
+					t1 = (new Date).getTime();
+					tmp = event.data.results;
+					val(100 + '%' + '; ' + (t1 - t0)  + 'ms; ' + 'compressed from ' + (kbl * 1024) + ' into ' + tmp.length + ';  look at console (F12) to look at Uint8Array; the data is stored in \'tmp\' variable too.');
+					enableBtns();
+					console.log(tmp);
+					workerTAR.terminate();//this is very important!!! You have to release memory!
+					workerTAR = undefined;
+				}
+			}
+			
+			t0 = (new Date).getTime();
+			val('No callback');
+			workerTAR.postMessage({
+				id:1,
+				action:'compress',
+				FilesDataArray: $ar
+			});
+		} else {
+			//stop if press again
+			workerTAR.terminate();
+			workerTAR = undefined;
+			console.log('workerTAR Stopped');
+		}
+	};
+	
+	//unTAR
+	untarme.onclick = function(){
+		if (typeof(tmp) == "undefined" || tmp == null) {
+			//remove this if-else in your code. this is just for this example
+		} else {
+			val('untarme');
+			if(typeof(workerTAR) == "undefined") {
+				workerTAR = new Worker('worker.tar.wrapper.js');
+				var Uints = tmp;// for xhr use this: new Uint8Array(this.response);
+				var $ar = [Uints];
+				workerTAR.onerror = function(e) {
+					val(e + '');
+					console.log("workerTAR error: ", e);
+					workerTAR = undefined;
+				}
+				workerTAR.onmessage = function(event) {//1
+					if (event.data.type === 1){
+						val('' + Math.round((event.data.cur - 1) / event.data.max_ * 100.) + '%');
+					} else if (event.data.type == 2){
+						t1 = (new Date).getTime();
+						val(100 + '%' + '; ' + (t1 - t0)  + 'ms; ' + 'decompressed from ' + tmp.length + ' into ' + (kbl * 1024) + '; look at console (F12) to find string.');
+						// event.data.results: data in Uint8Array 
+						console.log(event.data.results);
+					//	var str = Uint8ToString(event.data.results);
+					//	console.log(str);
+						workerTAR.terminate();//this is very important!!! You have to release memory!
+						workerTAR = undefined;
+					}
+				}
+				t0 = (new Date).getTime();
+				val('No callback');
+				workerTAR.postMessage({
+					id:1,
+					action:'decompress',
+					FilesDataArray: $ar
+				});
+			} else {
+				//stop if press again
+				workerTAR.terminate();
+				workerTAR = undefined;
+				console.log('workerTAR Stopped');
+			}
+		}
+	};
+	//into TAR. Main Thread
+	tarmemui.onclick = function() {
+		val("Please, wait until all calculations are done. UI is blocked.");
+		setTimeout(function(){
+		//you can remove setTimeout wrapper. This function is used due to show the message above.
+			var str_to_compress = makeid(kbl * 1024);
+			var ss = str2ab(str_to_compress);
+			var $ar = [new DataStorageInput('/',makeid(5) + "." + makeid(3),false,(ss))];
+			t0 = (new Date).getTime();
+			var extreme = 0;
+			var res_tar = tar_fn($ar,1,  
+				function(cur, max_) {  
+				//	console.log([cur, max_]);
+				});
+			t1 = (new Date).getTime();
+			console.log(res_tar);
+			tmp = res_tar;
+			enableBtns();
+			val(100 + '%' + '; ' + (t1 - t0)  + 'ms; ' +  'compressed from ' + (kbl * 1024) + ' into ' + tmp.length + ';  look at console (F12) to look at Uint8Array; the data is stored in \'tmp\' variable too.');
+		},5);
+	};
+	//unTAR. Main Thread
+	untarmemui.onclick = function() {
+		if (typeof(tmp) == "undefined" || tmp == null) {
+			//remove this if-else in your code. this is just for this example
+		} else {
+			val("Please, wait until all calculations are done. UI is blocked.");
+			setTimeout(function(){
+			//you can remove setTimeout wrapper. This function is used due to show the message above.
+				t0 = (new Date).getTime();
+				var res = tar_fn(tmp,0, function(cur, max_) {  
+				//	console.log([cur, max_]);
+				});
+				t1 = (new Date).getTime();
+				console.log(res); 
+				val(100 + '%' + '; ' + (t1 - t0)  + 'ms; ' +  'decompressed from ' + tmp.length + ' into ' + (kbl * 1024) + '; look at console (F12) to find string.');
+			},5);
+		}
+	};
+</script>
+</body>
+</html>
